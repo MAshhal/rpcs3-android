@@ -43,6 +43,7 @@ import androidx.lifecycle.compose.dropUnlessResumed
 import androidx.navigation.compose.NavHost
 import androidx.navigation.compose.composable
 import androidx.navigation.compose.rememberNavController
+import androidx.activity.compose.BackHandler
 import kotlinx.coroutines.launch
 import net.rpcs3.FirmwareRepository
 import net.rpcs3.GameRepository
@@ -86,6 +87,12 @@ fun GamesDestination(
     val context = LocalContext.current
     val scope = rememberCoroutineScope()
     val drawerState = rememberDrawerState(initialValue = DrawerValue.Closed)
+    
+    BackHandler(enabled = drawerState.isOpen) {
+        scope.launch {
+            drawerState.close()
+        }
+    }
 
     val installPkgLauncher = rememberLauncherForActivityResult(
         contract = ActivityResultContracts.GetContent(),

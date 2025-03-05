@@ -14,6 +14,7 @@ import androidx.compose.animation.core.AnimationSpec
 import androidx.compose.animation.core.LinearEasing
 import androidx.compose.animation.core.spring
 import androidx.compose.animation.core.tween
+import androidx.compose.foundation.background
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
@@ -24,15 +25,20 @@ import androidx.compose.foundation.pager.HorizontalPager
 import androidx.compose.foundation.pager.PagerState
 import androidx.compose.foundation.pager.rememberPagerState
 import androidx.compose.material.icons.Icons
+import androidx.compose.material.icons.automirrored.filled.KeyboardArrowLeft
 import androidx.compose.material.icons.filled.Settings
 import androidx.compose.material3.Button
+import androidx.compose.material3.ExperimentalMaterial3Api
 import androidx.compose.material3.Icon
+import androidx.compose.material3.IconButton
 import androidx.compose.material3.LinearProgressIndicator
 import androidx.compose.material3.LocalContentColor
 import androidx.compose.material3.LocalTextStyle
 import androidx.compose.material3.MaterialTheme
+import androidx.compose.material3.Scaffold
 import androidx.compose.material3.Surface
 import androidx.compose.material3.Text
+import androidx.compose.material3.TopAppBar
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.derivedStateOf
 import androidx.compose.runtime.getValue
@@ -65,6 +71,7 @@ import net.rpcs3.ui.settings.util.sizeIn
  * Time: 1:42 pm
  */
 
+@OptIn(ExperimentalMaterial3Api::class)
 @Composable
 fun SetupScreen(
     modifier: Modifier = Modifier
@@ -74,7 +81,8 @@ fun SetupScreen(
     val context = LocalContext.current
     val activity = LocalActivity.current
 
-    val isLoadingInProgress by remember { mutableStateOf(false) }
+    val progressChannel = FirmwareRepository.progressChannel
+    val isLoadingInProgress by remember(progressChannel) { mutableStateOf(progressChannel.value != null) }
 
     val directoryPicker = rememberLauncherForActivityResult(
         contract = ActivityResultContracts.StartActivityForResult()
@@ -113,10 +121,13 @@ fun SetupScreen(
     // It'll be better to handle back invokation on each screen separately
     // to disable on certain occasions
     // e.g: Firmware is being installed, etc
+    val isFirstPage by remember(pagerState.currentPage) {
+        derivedStateOf { pagerState.currentPage == 0 }
+    }
     BackHandler(
-        enabled = pagerState.currentPage != 0 && !isLoadingInProgress
+        enabled = !isLoadingInProgress
     ) {
-        if (pagerState.currentPage == 0) {
+        if (isFirstPage) {
             // Finish the activity instead of going back to games screen
             activity?.finish()
         } else {
@@ -131,11 +142,24 @@ fun SetupScreen(
         // wait for firmware installation to complete
     }
 
-    Surface(
-        modifier = modifier.fillMaxSize()
-    ) {
+    Scaffold(
+        modifier = modifier.fillMaxSize(),
+        topBar = {
+            TopAppBar(
+                title = {},
+                navigationIcon = {
+                    IconButton(
+                        onClick = { scope.launch { pagerState.animateScrollToPreviousPage() } },
+                        enabled = !isFirstPage
+                    ) {
+                        Icon(imageVector = Icons.AutoMirrored.Default.KeyboardArrowLeft, null)
+                    }
+                }
+            )
+        }
+    ) { contentPadding ->
         Box(
-            modifier = Modifier.fillMaxSize(),
+            modifier = Modifier.fillMaxSize().padding(contentPadding),
             contentAlignment = Alignment.Center
         ) {
             HorizontalPager(
@@ -189,6 +213,8 @@ fun FirmwareInstallationProgress() {
             derivedStateOf { maximumValue.longValue != 0L }
         }
         Column(
+            modifier = Modifier.fillMaxSize()
+                .background(MaterialTheme.colorScheme.surface.copy(alpha = 0.5f)),
             horizontalAlignment = Alignment.CenterHorizontally,
             verticalArrangement = Arrangement.spacedBy(8.dp)
         ) {
@@ -253,7 +279,7 @@ fun SetupPagerItem(
                 onClick = onButtonClick
             ) {
                 Text(
-                    text = "Install Firmware",
+                    text = item.buttonText,
                     fontWeight = FontWeight.Medium,
                 )
             }
@@ -264,21 +290,25 @@ fun SetupPagerItem(
 enum class SetupItem(
     val title: String,
     val desc: String,
+    val buttonText: String,
     private val iconResource: Any,
 ) {
     Welcome(
         title = "RPCS3",
         desc = "An experimental RPCS3 emulator port for Android.",
+        buttonText = "Next",
         iconResource = R.drawable.ic_rpcs3_foreground,
     ),
     Directory(
         title = "Set Up File System",
         desc = "Choose a directory to store emulator data and game files.",
+        buttonText = "Select directory",
         iconResource = Icons.Default.Settings,
     ),
     Firmware(
         title = "Install PS3 Firmware",
         desc = "Select and install the official PlayStation 3 firmware.",
+        buttonText = "Select firmware",
         iconResource = Icons.Default.Settings
     );
 

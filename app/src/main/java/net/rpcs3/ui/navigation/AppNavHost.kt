@@ -40,17 +40,20 @@ import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.tooling.preview.Preview
 import androidx.compose.ui.unit.dp
 import androidx.activity.compose.BackHandler
+import androidx.compose.runtime.LaunchedEffect
 import androidx.lifecycle.compose.dropUnlessResumed
 import androidx.navigation.compose.NavHost
 import androidx.navigation.compose.composable
 import androidx.navigation.compose.rememberNavController
 import kotlinx.coroutines.launch
 import net.rpcs3.FirmwareRepository
+import net.rpcs3.FirmwareStatus
 import net.rpcs3.GameRepository
 import net.rpcs3.ProgressRepository
 import net.rpcs3.RPCS3
 import net.rpcs3.ui.games.GamesScreen
 import net.rpcs3.ui.settings.SettingsScreen
+import net.rpcs3.ui.setup.screen.SetupScreen
 import kotlin.concurrent.thread
 
 @Preview
@@ -62,11 +65,19 @@ fun AppNavHost() {
         startDestination = "games"
     ) {
         composable(
+            route = "setup"
+        ) {
+            SetupScreen(
+                navigateBack = navController::navigateUp
+            )
+        }
+
+        composable(
             route = "games"
         ) {
             GamesDestination(
                 navigateToSettings = { navController.navigate("settings") }
-            )
+            ) { navController.navigate("setup") }
         }
 
         composable(
@@ -82,11 +93,19 @@ fun AppNavHost() {
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
 fun GamesDestination(
-    navigateToSettings: () -> Unit
+    navigateToSettings: () -> Unit,
+    navigateToSetup: () -> Unit
 ) {
     val context = LocalContext.current
     val scope = rememberCoroutineScope()
     val drawerState = rememberDrawerState(initialValue = DrawerValue.Closed)
+
+    LaunchedEffect(Unit) {
+        // Temporary solution for navigating to setup
+        // When setup is incomplete
+        if (FirmwareRepository.status.value == FirmwareStatus.None)
+            navigateToSetup()
+    }
 
     BackHandler(enabled = drawerState.isOpen) {
         scope.launch {

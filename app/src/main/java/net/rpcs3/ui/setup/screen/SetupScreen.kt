@@ -26,6 +26,7 @@ import androidx.compose.foundation.pager.PagerState
 import androidx.compose.foundation.pager.rememberPagerState
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.automirrored.filled.KeyboardArrowLeft
+import androidx.compose.material.icons.filled.Check
 import androidx.compose.material.icons.filled.Settings
 import androidx.compose.material3.Button
 import androidx.compose.material3.ExperimentalMaterial3Api
@@ -74,7 +75,8 @@ import net.rpcs3.ui.settings.util.sizeIn
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
 fun SetupScreen(
-    modifier: Modifier = Modifier
+    modifier: Modifier = Modifier,
+    navigateBack: () -> Unit
 ) {
     val pagerState = rememberPagerState { SetupItem.entries.size }
     val scope = rememberCoroutineScope()
@@ -186,6 +188,10 @@ fun SetupScreen(
                             if (FirmwareRepository.progressChannel.value == null) {
                                 firmwarePicker.launch("*/*")
                             }
+                        }
+
+                        SetupItem.Finish -> {
+                            navigateBack()
                         }
                     }
                 }
@@ -310,6 +316,13 @@ enum class SetupItem(
         desc = "Select and install the official PlayStation 3 firmware.",
         buttonText = "Select firmware",
         iconResource = Icons.Default.Settings
+    ),
+
+    Finish(
+        title = "Setup Complete",
+        desc = "",
+        buttonText = "Finish",
+        iconResource = Icons.Default.Check
     );
 
     @Composable
@@ -324,7 +337,7 @@ enum class SetupItem(
 @Composable
 private fun SetupScreenPreview() {
     ComposePreview {
-        SetupScreen()
+        SetupScreen {}
     }
 }
 

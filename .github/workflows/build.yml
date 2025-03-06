@@ -10,6 +10,9 @@ on:
       shouldrelease:
           description: Create release
           type: boolean
+      uploadbuild:
+          description: Upload build
+          type: boolean
       releasetag:
         description: Enter the tag name
         type: string
@@ -88,7 +91,7 @@ jobs:
 
     - name: Build release artifacts
       uses: actions/upload-artifact@v4
-      if: ${{ github.event_name != 'workflow_dispatch' }}
+      if: ${{ github.event_name != 'workflow_dispatch' }} || ${{ inputs.uploadbuild }}
       with:
         name: rpcs3-build
         path: |

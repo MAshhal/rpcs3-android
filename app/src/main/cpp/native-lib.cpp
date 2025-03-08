@@ -27,11 +27,13 @@
 #include "Input/dualsense_pad_handler.h"
 #include "Input/hid_pad_handler.h"
 #include "Input/pad_thread.h"
+#include "Input/virtual_pad_handler.h"
 #include "Loader/PSF.h"
 #include "Loader/PUP.h"
 #include "Loader/TAR.h"
 #include "Utilities/File.h"
 #include "Utilities/JIT.h"
+#include "Utilities/StrUtil.h"
 #include "Utilities/Thread.h"
 #include "hidapi_libusb.h"
 #include "libusb.h"
@@ -78,6 +80,9 @@ static std::atomic<ANativeWindow *> g_native_window;
 extern std::string g_android_executable_dir;
 extern std::string g_android_config_dir;
 extern std::string g_android_cache_dir;
+
+static std::mutex g_virtual_pad_mutex;
+static std::shared_ptr<Pad> g_virtual_pad;
 
 std::string g_input_config_override;
 cfg_input_configurations g_cfg_input_configs;
@@ -186,7 +191,7 @@ struct GraphicsFrame : GSFrameBase {
   void present_frame(std::vector<u8> &data, u32 pitch, u32 width, u32 height,
                      bool is_bgra) const override {}
 
-  void take_screenshot(const std::vector<u8> sshot_data, u32 sshot_width,
+  void take_screenshot(std::vector<u8> &&sshot_data, u32 sshot_width,
                        u32 sshot_height, bool is_bgra) override {}
 };
 
@@ -1023,6 +1028,11 @@ public:
 
 private:
   void impl(JNIEnv *env, CompilationWorkload workload) {
+    if (workload.path.empty()) {
+      Progress(env, workload.progressId).success(0);
+      return;
+    }
+
     rpcs3_android.error("Creating cache initiated, state %d",
                         (int)Emu.GetStatus(false));
 
@@ -1128,16 +1138,16 @@ private:
     rpcs3_android.error("Going to analyze executable");
 
     // FIXME: split states
-    // if (!is_vsh) {
-    if (_main.analyse(0, _main.elf_entry, _main.seg0_code_end,
-                      _main.applied_patches, std::vector<u32>{})) {
-      Emu.ConfigurePPUCache();
-      Emu.SetTestMode();
-      rpcs3_android.error("Going to precompile main PPU module");
-      ppu_initialize(_main);
-      mod_list.emplace_back(&_main);
+    if (!is_vsh) {
+      if (_main.analyse(0, _main.elf_entry, _main.seg0_code_end,
+                        _main.applied_patches, std::vector<u32>{})) {
+        Emu.ConfigurePPUCache();
+        Emu.SetTestMode();
+        rpcs3_android.error("Going to precompile main PPU module");
+        ppu_initialize(_main);
+        mod_list.emplace_back(&_main);
+      }
     }
-    // }
 
     rpcs3_android.error("Going to precompile PPU");
     ppu_precompile(dir_queue, mod_list.empty() ? nullptr : &mod_list);
@@ -1257,9 +1267,10 @@ static void setupCallbacks() {
       .resolve_path =
           [](std::string_view arg) {
             std::error_code ec;
-            auto result = std::filesystem::weakly_canonical(
-                              std::filesystem::path(arg), ec)
-                              .string();
+            auto result =
+                std::filesystem::weakly_canonical(
+                    std::filesystem::path(fmt::replace_all(arg, "\\", "/")), ec)
+                    .string();
             return ec ? std::string(arg) : result;
           },
       .get_font_dirs = [](auto...) { return std::vector<std::string>(); },
@@ -1269,6 +1280,112 @@ static void setupCallbacks() {
       .enable_display_sleep = [](auto...) {},
       .check_microphone_permissions = [](auto...) {},
   });
+}
+
+static bool initVirtualPad(const std::shared_ptr<Pad> &pad) {
+  u32 pclass_profile = 0;
+  pad->Init(CELL_PAD_STATUS_CONNECTED,
+            CELL_PAD_CAPABILITY_PS3_CONFORMITY |
+                CELL_PAD_CAPABILITY_PRESS_MODE |
+                CELL_PAD_CAPABILITY_HP_ANALOG_STICK |
+                CELL_PAD_CAPABILITY_ACTUATOR //| CELL_PAD_CAPABILITY_SENSOR_MODE
+            ,
+            CELL_PAD_DEV_TYPE_STANDARD, CELL_PAD_PCLASS_TYPE_STANDARD,
+            pclass_profile, 0, 0, 50);
+
+  pad->m_buttons.emplace_back(CELL_PAD_BTN_OFFSET_DIGITAL1, std::set<u32>{},
+                              CELL_PAD_CTRL_UP);
+  pad->m_buttons.emplace_back(CELL_PAD_BTN_OFFSET_DIGITAL1, std::set<u32>{},
+                              CELL_PAD_CTRL_DOWN);
+  pad->m_buttons.emplace_back(CELL_PAD_BTN_OFFSET_DIGITAL1, std::set<u32>{},
+                              CELL_PAD_CTRL_LEFT);
+  pad->m_buttons.emplace_back(CELL_PAD_BTN_OFFSET_DIGITAL1, std::set<u32>{},
+                              CELL_PAD_CTRL_RIGHT);
+  pad->m_buttons.emplace_back(CELL_PAD_BTN_OFFSET_DIGITAL2, std::set<u32>{},
+                              CELL_PAD_CTRL_CROSS);
+  pad->m_buttons.emplace_back(CELL_PAD_BTN_OFFSET_DIGITAL2, std::set<u32>{},
+                              CELL_PAD_CTRL_SQUARE);
+  pad->m_buttons.emplace_back(CELL_PAD_BTN_OFFSET_DIGITAL2, std::set<u32>{},
+                              CELL_PAD_CTRL_CIRCLE);
+  pad->m_buttons.emplace_back(CELL_PAD_BTN_OFFSET_DIGITAL2, std::set<u32>{},
+                              CELL_PAD_CTRL_TRIANGLE);
+  pad->m_buttons.emplace_back(CELL_PAD_BTN_OFFSET_DIGITAL2, std::set<u32>{},
+                              CELL_PAD_CTRL_L1);
+  pad->m_buttons.emplace_back(CELL_PAD_BTN_OFFSET_DIGITAL2, std::set<u32>{},
+                              CELL_PAD_CTRL_L2);
+  pad->m_buttons.emplace_back(CELL_PAD_BTN_OFFSET_DIGITAL1, std::set<u32>{},
+                              CELL_PAD_CTRL_L3);
+  pad->m_buttons.emplace_back(CELL_PAD_BTN_OFFSET_DIGITAL2, std::set<u32>{},
+                              CELL_PAD_CTRL_R1);
+  pad->m_buttons.emplace_back(CELL_PAD_BTN_OFFSET_DIGITAL2, std::set<u32>{},
+                              CELL_PAD_CTRL_R2);
+  pad->m_buttons.emplace_back(CELL_PAD_BTN_OFFSET_DIGITAL1, std::set<u32>{},
+                              CELL_PAD_CTRL_R3);
+  pad->m_buttons.emplace_back(CELL_PAD_BTN_OFFSET_DIGITAL1, std::set<u32>{},
+                              CELL_PAD_CTRL_START);
+  pad->m_buttons.emplace_back(CELL_PAD_BTN_OFFSET_DIGITAL1, std::set<u32>{},
+                              CELL_PAD_CTRL_SELECT);
+  pad->m_buttons.emplace_back(CELL_PAD_BTN_OFFSET_DIGITAL1, std::set<u32>{},
+                              CELL_PAD_CTRL_PS);
+
+  pad->m_sticks[0] = AnalogStick(CELL_PAD_BTN_OFFSET_ANALOG_LEFT_X, {}, {});
+  pad->m_sticks[1] = AnalogStick(CELL_PAD_BTN_OFFSET_ANALOG_LEFT_Y, {}, {});
+  pad->m_sticks[2] = AnalogStick(CELL_PAD_BTN_OFFSET_ANALOG_RIGHT_X, {}, {});
+  pad->m_sticks[3] = AnalogStick(CELL_PAD_BTN_OFFSET_ANALOG_RIGHT_Y, {}, {});
+
+  pad->m_sensors[0] =
+      AnalogSensor(CELL_PAD_BTN_OFFSET_SENSOR_X, 0, 0, 0, DEFAULT_MOTION_X);
+  pad->m_sensors[1] =
+      AnalogSensor(CELL_PAD_BTN_OFFSET_SENSOR_Y, 0, 0, 0, DEFAULT_MOTION_Y);
+  pad->m_sensors[2] =
+      AnalogSensor(CELL_PAD_BTN_OFFSET_SENSOR_Z, 0, 0, 0, DEFAULT_MOTION_Z);
+  pad->m_sensors[3] =
+      AnalogSensor(CELL_PAD_BTN_OFFSET_SENSOR_G, 0, 0, 0, DEFAULT_MOTION_G);
+
+  pad->m_vibrateMotors[0] = VibrateMotor(true, 0);
+  pad->m_vibrateMotors[1] = VibrateMotor(false, 0);
+
+  if (pad->m_player_id == 0) {
+    std::lock_guard lock(g_virtual_pad_mutex);
+    g_virtual_pad = pad;
+  }
+  return true;
+}
+
+extern "C" JNIEXPORT jboolean JNICALL Java_net_rpcs3_RPCS3_overlayPadData(
+    JNIEnv *env, jobject, jint digital1, jint digital2, jint leftStickX,
+    jint leftStickY, jint rightStickX, jint rightStickY) {
+
+  auto pad = [] {
+    std::shared_ptr<Pad> result;
+    std::lock_guard lock(g_virtual_pad_mutex);
+    result = g_virtual_pad;
+    return result;
+  }();
+
+  if (pad == nullptr) {
+    return false;
+  }
+
+  for (auto &btn : pad->m_buttons) {
+    if (btn.m_offset == CELL_PAD_BTN_OFFSET_DIGITAL1) {
+      btn.m_pressed = (digital1 & btn.m_outKeyCode) != 0;
+      btn.m_value = btn.m_pressed ? 127 : 0;
+      if (btn.m_pressed && btn.m_outKeyCode == CELL_PAD_CTRL_START) {
+        rpcs3_android.warning("pad: start pressed! %p",
+                              static_cast<void *>(pad.get()));
+      }
+    } else if (btn.m_offset == CELL_PAD_BTN_OFFSET_DIGITAL2) {
+      btn.m_pressed = (digital2 & btn.m_outKeyCode) != 0;
+      btn.m_value = btn.m_pressed ? 127 : 0;
+    }
+  }
+
+  pad->m_sticks[0].m_value = leftStickX;
+  pad->m_sticks[1].m_value = leftStickY;
+  pad->m_sticks[2].m_value = rightStickX;
+  pad->m_sticks[3].m_value = rightStickY;
+  return true;
 }
 
 extern "C" JNIEXPORT jboolean JNICALL
@@ -1328,9 +1445,15 @@ Java_net_rpcs3_RPCS3_initialize(JNIEnv *env, jobject, jstring rootDir) {
     set_rlim(RLIMIT_NOFILE, 0x10000);
     set_rlim(RLIMIT_STACK, 128 * 1024 * 1024);
 
+    virtual_pad_handler::set_on_connect_cb(initVirtualPad);
     setupCallbacks();
     Emu.SetHasGui(false);
     Emu.Init();
+
+    g_cfg_input.player1.handler.set(pad_handler::virtual_pad);
+    g_cfg_input.player1.device.from_string("Virtual");
+
+    g_cfg_input.save("", g_cfg_input_configs.default_config);
 
     // g_cfg_vfs.dev_hdd0.to_string().ends_with("/")
     g_cfg.video.resolution.set(video_resolution::_720p);
@@ -1338,6 +1461,8 @@ Java_net_rpcs3_RPCS3_initialize(JNIEnv *env, jobject, jstring rootDir) {
     g_cfg.core.ppu_decoder.set(ppu_decoder_type::llvm);
     g_cfg.core.spu_decoder.set(spu_decoder_type::llvm);
     g_cfg.core.llvm_cpu.from_string("");
+    g_cfg.video.perf_overlay.perf_overlay_enabled.set(true);
+
     // g_cfg.core.llvm_cpu.from_string(fallback_cpu_detection());
     Emulator::SaveSettings(g_cfg.to_string(), Emu.GetTitleID());
   }
@@ -1396,6 +1521,8 @@ extern "C" JNIEXPORT jboolean JNICALL Java_net_rpcs3_RPCS3_surfaceEvent(
     if (prevWindow != nullptr) {
       ANativeWindow_release(prevWindow);
     }
+
+    Emu.Pause();
   } else {
     auto newWindow = ANativeWindow_fromSurface(env, surface);
 
@@ -1413,6 +1540,10 @@ extern "C" JNIEXPORT jboolean JNICALL Java_net_rpcs3_RPCS3_surfaceEvent(
       if (prevWindow != nullptr) {
         ANativeWindow_release(prevWindow);
       }
+    }
+
+    if (event == 0 && Emu.IsPaused()) {
+      Emu.Resume();
     }
   }
 
@@ -1451,7 +1582,7 @@ extern "C" JNIEXPORT jboolean JNICALL Java_net_rpcs3_RPCS3_usbDeviceEvent(
                                     std::vector<std::string>>>
         handlerToDevices;
 
-    auto collectDevices = [&](auto handler) {
+    auto collectDevices = [&]<typename T>(T handler) {
       handler->Init();
 
       std::vector<std::string> devices;
@@ -1483,21 +1614,36 @@ extern "C" JNIEXPORT jboolean JNICALL Java_net_rpcs3_RPCS3_usbDeviceEvent(
       selectedHandler = pad_handler::ds3;
     }
 
+    if (selectedHandler == pad_handler::null) {
+      selectedHandler = pad_handler::virtual_pad;
+    }
+
     if (selectedHandler != g_cfg_input.player1.handler.get()) {
       rpcs3_android.warning("install %s pad handler", selectedHandler);
 
       g_cfg_input.player1.handler.set(selectedHandler);
 
-      if (selectedHandler != pad_handler::null) {
+      if (selectedHandler == pad_handler::null) {
+        g_cfg_input.player1.device.from_default();
+      } else if (selectedHandler == pad_handler::virtual_pad) {
+        g_cfg_input.player1.handler.set(pad_handler::virtual_pad);
+        g_cfg_input.player1.device.from_string("Virtual");
+      } else {
         g_cfg_input.player1.device.from_string(
             handlerToDevices[selectedHandler].second.front());
         handlerToDevices[selectedHandler].first->init_config(
             &g_cfg_input.player1.config);
-      } else {
-        g_cfg_input.player1.device.from_default();
+        if (selectedHandler != pad_handler::virtual_pad) {
+          std::lock_guard lock(g_virtual_pad_mutex);
+          g_virtual_pad = nullptr;
+        }
       }
 
       g_cfg_input.save("", g_cfg_input_configs.default_config);
+
+      if (!Emu.IsStopped()) {
+        pad::reset(Emu.GetTitleID());
+      }
     }
   }
 

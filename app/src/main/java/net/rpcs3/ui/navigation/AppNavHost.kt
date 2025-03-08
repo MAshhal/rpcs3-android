@@ -96,8 +96,6 @@ fun GamesDestination(
         }
     }
 
-    val context = LocalContext.current
-
     val installPkgLauncher = rememberLauncherForActivityResult(
         contract = ActivityResultContracts.GetContent(),
         onResult = { uri: Uri? ->

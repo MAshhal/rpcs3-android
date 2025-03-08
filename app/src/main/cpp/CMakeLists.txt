@@ -3,7 +3,17 @@ project("rpcs3-android")
 
 set(CMAKE_CXX_STANDARD 20)
 set(CMAKE_POSITION_INDEPENDENT_CODE on)
-# set(CMAKE_CXX_FLAGS "${CMAKE_CXX_FLAGS} -mno-avx")
+
+if(CMAKE_SYSTEM_PROCESSOR MATCHES "aarch64")
+    set(ARCH_FLAGS "-mcpu=cortex-a53")
+else()
+    set(ARCH_FLAGS "-mno-avx")
+endif()
+
+set(CMAKE_CXX_FLAGS "${CMAKE_CXX_FLAGS} ${ARCH_FLAGS}")
+set(CMAKE_C_FLAGS "${CMAKE_C_FLAGS} ${ARCH_FLAGS}")
+set(CMAKE_SHARED_LINKER_FLAGS "${CMAKE_SHARED_LINKER_FLAGS} ${ARCH_FLAGS}")
+set(CMAKE_EXE_LINKER_FLAGS "${CMAKE_EXE_LINKER_FLAGS} ${ARCH_FLAGS}")
 
 
 set(FFMPEG_PATH ${CMAKE_CURRENT_SOURCE_DIR}/FFmpeg)
@@ -99,6 +109,7 @@ add_library(${CMAKE_PROJECT_NAME} SHARED
     rpcs3/rpcs3/Input/evdev_gun_handler.cpp
 #    rpcs3/rpcs3/Input/gui_pad_thread.cpp
     rpcs3/rpcs3/Input/hid_pad_handler.cpp
+    rpcs3/rpcs3/Input/virtual_pad_handler.cpp
     rpcs3/rpcs3/Input/mm_joystick_handler.cpp
     rpcs3/rpcs3/Input/pad_thread.cpp
     rpcs3/rpcs3/Input/product_info.cpp

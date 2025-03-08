@@ -51,12 +51,14 @@ import net.rpcs3.ProgressRepository
 import net.rpcs3.RPCS3
 import net.rpcs3.ui.games.GamesScreen
 import net.rpcs3.ui.settings.SettingsScreen
+import net.rpcs3.dialogs.AlertDialogQueue
 import kotlin.concurrent.thread
 
 @Preview
 @Composable
 fun AppNavHost() {
     val navController = rememberNavController()
+    AlertDialogQueue.alertDialog()
     NavHost(
         navController = navController,
         startDestination = "games"
@@ -93,6 +95,8 @@ fun GamesDestination(
             drawerState.close()
         }
     }
+
+    val context = LocalContext.current
 
     val installPkgLauncher = rememberLauncherForActivityResult(
         contract = ActivityResultContracts.GetContent(),

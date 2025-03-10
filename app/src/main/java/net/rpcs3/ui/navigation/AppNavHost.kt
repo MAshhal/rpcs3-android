@@ -2,6 +2,7 @@ package net.rpcs3.ui.navigation
 
 import android.net.Uri
 import android.util.Log
+import androidx.activity.compose.BackHandler
 import androidx.activity.compose.rememberLauncherForActivityResult
 import androidx.activity.result.contract.ActivityResultContracts
 import androidx.compose.foundation.layout.Column
@@ -38,14 +39,13 @@ import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.tooling.preview.Preview
 import androidx.compose.ui.unit.dp
-import androidx.activity.compose.BackHandler
 import kotlinx.coroutines.launch
 import net.rpcs3.FirmwareRepository
 import net.rpcs3.GameRepository
 import net.rpcs3.ProgressRepository
 import net.rpcs3.RPCS3
-import net.rpcs3.ui.games.GamesScreen
 import net.rpcs3.dialogs.AlertDialogQueue
+import net.rpcs3.ui.games.GamesScreen
 import kotlin.concurrent.thread
 
 @OptIn(ExperimentalMaterial3Api::class)
@@ -63,7 +63,7 @@ fun AppNavHost() {
 
     val context = LocalContext.current
 
-    AlertDialogQueue.alertDialog()
+    AlertDialogQueue.AlertDialog()
 
     val installPkgLauncher = rememberLauncherForActivityResult(
         contract = ActivityResultContracts.GetContent(),

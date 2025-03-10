@@ -126,7 +126,9 @@ class ProgressRepository {
                             }
                         }
                     } else if (value < 0) {
-                        builder.setContentText("Installation failed")
+                        if (text == null) {
+                            builder.setContentText("Installation failed")
+                        }
                         with(notificationManager) {
                             notify(requestId.toInt(), builder.build())
                         }

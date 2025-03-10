@@ -33,6 +33,7 @@
 #include "Loader/TAR.h"
 #include "Utilities/File.h"
 #include "Utilities/JIT.h"
+#include "Utilities/StrFmt.h"
 #include "Utilities/StrUtil.h"
 #include "Utilities/Thread.h"
 #include "hidapi_libusb.h"
@@ -521,10 +522,16 @@ static std::pair<std::string, std::u32string> g_strings[] = {
     MAKE_STRING(INVALID, "Invalid"),
 };
 
+enum GameFlags {
+  kGameFlagLocked = 1 << 0,
+  kGameFlagTrial = 1 << 1,
+};
+
 struct GameInfo {
   std::string path;
   std::string name;
   std::string iconPath;
+  int flags = 0;
 };
 
 class Progress {
@@ -584,15 +591,21 @@ static void sendGameInfo(JNIEnv *env, jlong progressId,
 
   jmethodID gameConstructor = ensure(env->GetMethodID(
       gameClass, "<init>",
-      "(Ljava/lang/String;Ljava/lang/String;Ljava/lang/String;)V"));
+      "(Ljava/lang/String;Ljava/lang/String;Ljava/lang/String;I)V"));
 
   std::vector<jobject> objects;
   objects.reserve(infos.size());
 
   for (const auto &info : infos) {
-    objects.push_back(env->NewObject(gameClass, gameConstructor,
-                                     wrap(env, info.path), wrap(env, info.name),
-                                     wrap(env, info.iconPath), nullptr));
+    auto path = Emu.GetCallbacks().resolve_path(info.path);
+    if (path.ends_with('/')) {
+      path.resize(path.size() - 1);
+    }
+
+    objects.push_back(env->NewObject(
+        gameClass, gameConstructor, wrap(env, path), wrap(env, info.name),
+        wrap(env, Emu.GetCallbacks().resolve_path(info.iconPath)),
+        jint(info.flags)));
   }
 
   auto result = env->NewObjectArray(objects.size(), gameClass, nullptr);
@@ -605,24 +618,94 @@ static void sendGameInfo(JNIEnv *env, jlong progressId,
                             progressId);
 }
 
+static void sendVshBootable(JNIEnv *env, jlong progressId) {
+  auto dev_flash = g_cfg_vfs.get_dev_flash();
+
+  sendGameInfo(
+      env, progressId,
+      {{GameInfo{
+          .path = dev_flash + "/vsh/module/vsh.self",
+          .name = "VSH",
+          .iconPath = dev_flash + "vsh/resource/explore/icon/icon_home.png",
+      }}});
+}
+
+static bool tryUnlockGame(const char *contentId) {
+  const auto licenseDir = fmt::format(
+      "%shome/%s/exdata/", rpcs3::utils::get_hdd0_dir(), Emu.GetUsr());
+
+  const auto licenseFile = fmt::format("%s%s", licenseDir, contentId);
+  if (std::filesystem::is_regular_file(licenseFile + ".rap")) {
+    return true;
+  }
+
+  if (std::filesystem::is_regular_file(licenseFile + ".edat")) {
+    return true;
+  }
+
+  return false;
+}
+
 static void collectGamePaths(std::vector<std::string> &paths,
                              const std::string &rootDir) {
   std::error_code ec;
-  for (auto entry :
-       std::filesystem::recursive_directory_iterator(rootDir, ec)) {
-    if (!entry.is_directory()) {
-      continue;
+  std::vector<std::filesystem::path> workList;
+  workList.reserve(32);
+  if (!std::filesystem::is_directory(rootDir)) {
+    auto rootPath = std::filesystem::path(rootDir).parent_path();
+    if (rootPath.filename() == "USRDIR") {
+      rootPath = rootPath.parent_path();
+    }
+    if (rootPath.filename() == "PS3_GAME") {
+      rootPath = rootPath.parent_path();
     }
 
-    if (std::filesystem::is_regular_file(entry.path() / "PARAM.SFO")) {
-      paths.push_back(entry.path().string());
-      continue;
+    workList.push_back(rootPath);
+  } else {
+    workList.push_back(rootDir);
+  }
+
+  while (!workList.empty()) {
+    auto dir = std::move(workList.back());
+    workList.pop_back();
+
+    for (auto entry : std::filesystem::directory_iterator(dir, ec)) {
+      if (entry.is_directory()) {
+        if (entry.path().filename() != "C00") {
+          workList.push_back(entry.path());
+        }
+
+        continue;
+      }
+
+      if (entry.is_regular_file() && entry.path().filename() == "PARAM.SFO") {
+        paths.push_back(entry.path().parent_path().string());
+        continue;
+      }
     }
   }
 }
 
-static std::optional<GameInfo> parsePsf(std::string path,
-                                        const psf::registry &psf) {
+static std::string locateEbootPath(const std::string &root) {
+
+  for (auto suffix : {
+           "/EBOOT.BIN",
+           "/USRDIR/EBOOT.BIN",
+           "/USRDIR/ISO.BIN.EDAT",
+           "/PS3_GAME/USRDIR/EBOOT.BIN",
+       }) {
+    std::string tryPath = root + suffix;
+
+    if (std::filesystem::is_regular_file(tryPath)) {
+      return tryPath;
+    }
+  }
+
+  return {};
+}
+
+static std::optional<GameInfo> fetchGameInfo(std::string path,
+                                             const psf::registry &psf) {
   auto title_id = psf::get_string(psf, "TITLE_ID");
   auto name = psf::get_string(psf, "TITLE");
   auto app_ver = psf::get_string(psf, "APP_VER");
@@ -639,18 +722,58 @@ static std::optional<GameInfo> parsePsf(std::string path,
     return {};
   }
 
+  auto rootPath =
+      rpcs3::utils::get_hdd0_dir() + "game/" + std::string(title_id) + "/";
+
   if (path.empty()) {
-    path = rpcs3::utils::get_hdd0_dir() + "game/" + std::string(title_id) + "/";
-    rpcs3_android.warning("title_id(%s) -> path(%s)", title_id.data(),
-                          path.c_str());
+    path = rootPath;
   }
 
   auto icon_path = path + "/ICON0.PNG";
   auto movie_path = path + "/ICON1.PAM";
+
+  bool isLocked = false;
+
+  auto ebootPath = locateEbootPath(rootPath);
+
+  SelfAdditionalInfo info;
+
+  if (!ebootPath.empty()) {
+    if (fs::file eboot{ebootPath};
+        eboot && eboot.size() >= 4 && eboot.read<u32>() == "SCE\0"_u32) {
+      isLocked = !decrypt_self(eboot, nullptr, &info);
+    }
+  }
+
+  auto npd = [&]() -> NPD_HEADER * {
+    for (auto &supplemental : info.supplemental_hdr) {
+      if (supplemental.type == 3) {
+        return &supplemental.PS3_npdrm_header.npd;
+      }
+    }
+
+    return nullptr;
+  }();
+
+  int flags = 0;
+
+  if (isLocked) {
+    flags |= kGameFlagLocked;
+    rpcs3_android.warning("game %s is locked", rootPath);
+  }
+
+  bool isTrial = std::filesystem::is_directory(rootPath + "/C00");
+
+  if (isTrial && (!npd || !tryUnlockGame(npd->content_id))) {
+    flags |= kGameFlagTrial;
+    rpcs3_android.warning("game %s is trial", rootPath);
+  }
+
   return GameInfo{
       .path = path,
       .name = std::string(name),
       .iconPath = icon_path,
+      .flags = flags,
   };
 }
 
@@ -693,7 +816,7 @@ static void collectGameInfo(JNIEnv *env, jlong progressId,
 
     rpcs3_android.notice("collectGameInfo: sfo at %s", path);
 
-    if (auto gameInfo = parsePsf(path, psf)) {
+    if (auto gameInfo = fetchGameInfo(path, psf)) {
       gameInfos.push_back(std::move(*gameInfo));
 
       if (gameInfos.size() >= 10) {
@@ -703,7 +826,8 @@ static void collectGameInfo(JNIEnv *env, jlong progressId,
   }
 
   submit();
-  progress.success(paths.size());
+
+  progress.success(processed);
 }
 
 class MainThreadProcessor {
@@ -1160,8 +1284,6 @@ private:
     MessageDialog::popPendingProgressId(workload.progressId);
 
     Progress(env, workload.progressId).success(0);
-
-    collectGameInfo(env, workload.progressId, {{workload.path}});
   }
 } static g_compilationQueue;
 
@@ -1371,10 +1493,6 @@ extern "C" JNIEXPORT jboolean JNICALL Java_net_rpcs3_RPCS3_overlayPadData(
     if (btn.m_offset == CELL_PAD_BTN_OFFSET_DIGITAL1) {
       btn.m_pressed = (digital1 & btn.m_outKeyCode) != 0;
       btn.m_value = btn.m_pressed ? 127 : 0;
-      if (btn.m_pressed && btn.m_outKeyCode == CELL_PAD_CTRL_START) {
-        rpcs3_android.warning("pad: start pressed! %p",
-                              static_cast<void *>(pad.get()));
-      }
     } else if (btn.m_offset == CELL_PAD_BTN_OFFSET_DIGITAL2) {
       btn.m_pressed = (digital2 & btn.m_outKeyCode) != 0;
       btn.m_value = btn.m_pressed ? 127 : 0;
@@ -1491,13 +1609,18 @@ Java_net_rpcs3_RPCS3_startMainThreadProcessor(JNIEnv *env, jobject) {
 extern "C" JNIEXPORT jboolean JNICALL Java_net_rpcs3_RPCS3_collectGameInfo(
     JNIEnv *env, jobject, jstring jrootDir, jlong progressId) {
 
+  if (std::filesystem::is_regular_file(g_cfg_vfs.get_dev_flash() +
+                                       "/vsh/module/vsh.self")) {
+    sendVshBootable(env, progressId);
+  }
+
   collectGameInfo(env, progressId, {unwrap(env, jrootDir)});
   return true;
 }
 
 extern "C" JNIEXPORT void JNICALL Java_net_rpcs3_RPCS3_shutdown(JNIEnv *env,
                                                                 jobject) {
-  Emu.GracefulShutdown(true, true, false);
+  Emu.Kill();
 }
 
 extern "C" JNIEXPORT jboolean JNICALL Java_net_rpcs3_RPCS3_boot(JNIEnv *env,
@@ -1729,15 +1852,7 @@ extern "C" JNIEXPORT jboolean JNICALL Java_net_rpcs3_RPCS3_installFw(
     return false;
   }
 
-  auto dev_flash = g_cfg_vfs.get_dev_flash();
-
-  sendGameInfo(
-      env, progressId,
-      {{GameInfo{
-          .path = dev_flash + "/vsh/module/vsh.self",
-          .name = "VSH",
-          .iconPath = dev_flash + "vsh/resource/explore/icon/icon_home.png",
-      }}});
+  sendVshBootable(env, progressId);
 
   jlong processed = 0;
   for (const auto &update_filename : update_filenames) {
@@ -1787,7 +1902,8 @@ extern "C" JNIEXPORT jboolean JNICALL Java_net_rpcs3_RPCS3_installFw(
 
   sendFirmwareInstalled(env, utils::get_firmware_version());
 
-  g_compilationQueue.push(progress, dev_flash + "/vsh/module/vsh.self");
+  g_compilationQueue.push(progress,
+                          g_cfg_vfs.get_dev_flash() + "/vsh/module/vsh.self");
   // progress.success(update_filenames.size());
   return true;
 }
@@ -1821,7 +1937,7 @@ extern "C" JNIEXPORT jboolean JNICALL Java_net_rpcs3_RPCS3_installPkgFile(
   }};
 
   for (auto &reader : readers) {
-    if (auto gameInfo = parsePsf("", reader.get_psf())) {
+    if (auto gameInfo = fetchGameInfo("", reader.get_psf())) {
       sendGameInfo(env, requestId, {{*gameInfo}});
     }
   }
@@ -1860,13 +1976,74 @@ extern "C" JNIEXPORT jboolean JNICALL Java_net_rpcs3_RPCS3_installPkgFile(
   }
 
   if (worker()) {
-    // auto paths = std::vector(bootable_paths.begin(), bootable_paths.end());
-    // collectGameInfo(env, requestId, paths);
+    auto paths = std::vector(bootable_paths.begin(), bootable_paths.end());
+    collectGameInfo(env, -1, paths);
 
-    for (auto &path : bootable_paths) {
+    for (auto &path : paths) {
       g_compilationQueue.push(progress, std::move(path));
     }
   }
 
   return true;
+}
+
+extern "C" JNIEXPORT jboolean JNICALL Java_net_rpcs3_RPCS3_installKey(
+    JNIEnv *env, jobject, jint fd, jlong requestId, jstring gamePath) {
+  auto file = fs::file::from_native_handle(fd);
+  Progress progress(env, requestId);
+
+  AtExit atExit{[&] { file.release_handle(); }};
+
+  if (file.size() == 16) {
+    auto rootPath = unwrap(env, gamePath);
+    auto ebootPath = locateEbootPath(rootPath);
+
+    std::vector<std::uint8_t> bytes;
+    if (!file.read(bytes, 16)) {
+      progress.failure("Failed to read key");
+      return false;
+    }
+
+    SelfAdditionalInfo info;
+
+    decrypt_self(fs::file(ebootPath), nullptr, &info);
+
+    auto npd = [&]() -> NPD_HEADER * {
+      for (auto &supplemental : info.supplemental_hdr) {
+        if (supplemental.type == 3) {
+          return &supplemental.PS3_npdrm_header.npd;
+        }
+      }
+
+      return nullptr;
+    }();
+
+    if (npd == nullptr) {
+      progress.failure("Failed to fetch NPDRM of SELF");
+      return false;
+    }
+
+    const auto licenseFile =
+        fmt::format("%shome/%s/exdata/%s.rap", rpcs3::utils::get_hdd0_dir(),
+                    Emu.GetUsr(), npd->content_id);
+
+    if (!fs::write_file(licenseFile,
+                        fs::open_mode::create + fs::open_mode::trunc, bytes)) {
+      progress.failure(fmt::format("Failed to write key to %s", licenseFile));
+      return false;
+    }
+
+    if (!decrypt_self(fs::file(ebootPath))) {
+      progress.failure("Provided key is invalid for selected game");
+      fs::remove_file(licenseFile);
+      return false;
+    }
+
+    collectGameInfo(env, -1, {rootPath});
+    g_compilationQueue.push(progress, std::move(ebootPath));
+    return true;
+  }
+
+  progress.failure("Unsupported key type");
+  return false;
 }

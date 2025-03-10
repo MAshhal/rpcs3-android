@@ -1,22 +1,37 @@
 package net.rpcs3
 
 import android.content.res.Resources.NotFoundException
+import androidx.compose.runtime.MutableIntState
 import androidx.compose.runtime.MutableState
+import androidx.compose.runtime.mutableIntStateOf
 import androidx.compose.runtime.mutableStateListOf
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.snapshots.SnapshotStateList
+import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.withContext
 import kotlinx.serialization.Serializable
 import kotlinx.serialization.json.Json
 import java.io.File
 import java.security.InvalidParameterException
 
+enum class GameFlag {
+    Locked,
+    Trial
+}
+
 @Serializable
-data class GameInfo(val path: String, var name: String? = null, var iconPath: String? = null)
+data class GameInfo(
+    val path: String,
+    var name: String? = null,
+    var iconPath: String? = null,
+    var gameFlags: Int = 0
+)
 
 data class GameInfoStore(
     val path: String,
     val name: MutableState<String?> = mutableStateOf(null),
-    val iconPath: MutableState<String?> = mutableStateOf(null)
+    val iconPath: MutableState<String?> = mutableStateOf(null),
+    val gameFlags: MutableIntState = mutableIntStateOf(0)
 )
 
 enum class GameProgressType {
@@ -47,13 +62,20 @@ data class Game(
 
     fun removeProgress(type: GameProgressType) =
         progressList.removeIf { progress -> progress.type == type }
+
+    fun hasFlag(flag: GameFlag) = (info.gameFlags.intValue and (1 shl flag.ordinal)) != 0
 }
 
 private fun toStore(info: GameInfo) =
-    GameInfoStore(info.path, mutableStateOf(info.name), mutableStateOf(info.iconPath))
+    GameInfoStore(
+        info.path,
+        mutableStateOf(info.name),
+        mutableStateOf(info.iconPath),
+        mutableIntStateOf(info.gameFlags)
+    )
 
 private fun toInfo(store: GameInfoStore) =
-    GameInfo(store.path, store.name.value, store.iconPath.value)
+    GameInfo(store.path, store.name.value, store.iconPath.value, store.gameFlags.intValue)
 
 class GameRepository {
     private val games = mutableStateListOf<Game>()
@@ -73,42 +95,57 @@ class GameRepository {
             }
         }
 
-        fun load() {
-            try {
-                instance.games.clear()
-                instance.games += Json.decodeFromString<Array<GameInfo>>(File(RPCS3.rootDirectory + "games.json").readText())
-                    .map { info -> Game(toStore(info)) }
-            } catch (_: NotFoundException) {
-            } catch (e: Exception) {
-                e.printStackTrace()
+        suspend fun load() {
+            withContext(Dispatchers.IO) {
+                try {
+                    instance.games.clear()
+                    instance.games += Json.decodeFromString<Array<GameInfo>>(
+                        File(RPCS3.rootDirectory + "games.json").readText()
+                    ).map { info -> Game(toStore(info)) }
+                } catch (_: NotFoundException) {
+                } catch (e: Exception) {
+                    e.printStackTrace()
+                }
             }
         }
 
         @JvmStatic
         fun add(gameInfos: Array<GameInfo>, progressId: Long) {
             synchronized(instance) {
-                val progressEntry =
-                    instance.games.filter { game -> game.info.path == "$" }.find { game ->
-                        val progress = game.findProgress(GameProgressType.Install)
-                            ?.find { progress -> progress.id == progressId }
-                        progress != null
-                    }
+                if (progressId >= 0) {
+                    val progressEntry =
+                        instance.games.filter { game -> game.info.path == "$" }.find { game ->
+                            val progress = game.findProgress(GameProgressType.Install)
+                                ?.find { progress -> progress.id == progressId }
+                            progress != null
+                        }
 
-                if (progressEntry != null) {
-                    instance.games.remove(progressEntry)
+                    if (progressEntry != null) {
+                        instance.games.remove(progressEntry)
+                    }
                 }
 
                 gameInfos.forEach { info ->
                     val existsGame = instance.games.find { x -> x.info.path == info.path }
                     if (existsGame == null) {
                         val newGame = Game(toStore(info))
-                        newGame.addProgress(GameProgress(progressId, GameProgressType.Install))
+                        if (progressId >= 0) {
+                            newGame.addProgress(GameProgress(progressId, GameProgressType.Install))
+                        }
                         instance.games.add(0, newGame)
                     } else {
                         existsGame.info.name.value = info.name ?: existsGame.info.name.value
                         existsGame.info.iconPath.value =
                             info.iconPath ?: existsGame.info.iconPath.value
-                        existsGame.addProgress(GameProgress(progressId, GameProgressType.Install))
+                        existsGame.info.gameFlags.intValue = info.gameFlags
+                        if (progressId >= 0) {
+                            existsGame.addProgress(
+                                GameProgress(
+                                    progressId,
+                                    GameProgressType.Install
+                                )
+                            )
+                        }
                     }
                 }
                 save()
@@ -158,5 +195,9 @@ class GameRepository {
         }
 
         fun list() = instance.games
+
+        fun clear() {
+            instance.games.clear()
+        }
     }
 }

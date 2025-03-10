@@ -2,6 +2,7 @@ package net.rpcs3.ui.navigation
 
 import android.net.Uri
 import android.util.Log
+import androidx.activity.compose.BackHandler
 import androidx.activity.compose.rememberLauncherForActivityResult
 import androidx.activity.result.contract.ActivityResultContracts
 import androidx.compose.foundation.layout.Column
@@ -43,15 +44,14 @@ import androidx.lifecycle.compose.dropUnlessResumed
 import androidx.navigation.compose.NavHost
 import androidx.navigation.compose.composable
 import androidx.navigation.compose.rememberNavController
-import androidx.activity.compose.BackHandler
 import kotlinx.coroutines.launch
 import net.rpcs3.FirmwareRepository
 import net.rpcs3.GameRepository
 import net.rpcs3.ProgressRepository
 import net.rpcs3.RPCS3
-import net.rpcs3.ui.games.GamesScreen
 import net.rpcs3.ui.settings.SettingsScreen
 import net.rpcs3.dialogs.AlertDialogQueue
+import net.rpcs3.ui.games.GamesScreen
 import kotlin.concurrent.thread
 
 @Preview

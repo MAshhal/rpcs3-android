@@ -58,7 +58,7 @@ import kotlin.concurrent.thread
 @Composable
 fun AppNavHost() {
     val navController = rememberNavController()
-    AlertDialogQueue.alertDialog()
+    AlertDialogQueue.AlertDialog()
     NavHost(
         navController = navController,
         startDestination = "games"

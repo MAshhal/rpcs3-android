@@ -5,15 +5,22 @@ import android.os.Bundle
 import android.view.View
 
 class RPCS3Activity : Activity() {
+    private lateinit var unregisterUsbEventListener: () -> Unit
+
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
         setContentView(R.layout.activity_rpcs3)
 
-        listenUsbEvents(this)
+        unregisterUsbEventListener = listenUsbEvents(this)
         enableFullScreenImmersive()
 
         val surfaceView = findViewById<GraphicsFrame>(R.id.surfaceView)
         surfaceView.boot(intent.getStringExtra("path")!!)
+    }
+
+    override fun onDestroy() {
+        super.onDestroy()
+        unregisterUsbEventListener()
     }
 
     private fun enableFullScreenImmersive() {

@@ -93,9 +93,33 @@ fun SettingsScreen(
                     leadingIcon = { PreferenceIcon(icon = painterResource(R.drawable.ic_folder)) },
                     subtitle = { PreferenceSubtitle(text = "Open internal directory of RPCS3 in file manager") },
                 ) {
-                    if (context.launchBrowseIntent(Intent.ACTION_VIEW) or context.launchBrowseIntent()) {
-                        // No Activity found to handle action
-                    }
+                    context.launchBrowseIntent()
+                }
+            }
+
+            item { HorizontalDivider() }
+            item(
+                key = "internal_directory_2"
+            ) {
+                RegularPreference(
+                    title = { PreferenceTitle(title = "View Internal Directory") },
+                    leadingIcon = { PreferenceIcon(icon = painterResource(R.drawable.ic_folder)) },
+                    subtitle = { PreferenceSubtitle(text = "Open internal directory of RPCS3 in file manager") },
+                ) {
+                    context.launchBrowseIntent(Intent.ACTION_VIEW)
+                }
+            }
+
+            item { HorizontalDivider() }
+            item(
+                key = "internal_directory_3"
+            ) {
+                RegularPreference(
+                    title = { PreferenceTitle(title = "View Internal Directory") },
+                    leadingIcon = { PreferenceIcon(icon = painterResource(R.drawable.ic_folder)) },
+                    subtitle = { PreferenceSubtitle(text = "Open internal directory of RPCS3 in file manager") },
+                ) {
+                    context.launchBrowseIntent(Intent.ACTION_VIEW)
                 }
             }
 
@@ -157,6 +181,24 @@ private fun Context.launchBrowseIntent(
         true
     } catch (_: ActivityNotFoundException) {
         println("No activity found to handle $action intent")
+        false
+    }
+}
+
+private fun Context.launchBrowseIntent(): Boolean {
+    return try {
+        val intent = Intent(Intent.ACTION_OPEN_DOCUMENT_TREE).apply {
+            putExtra(
+                DocumentsContract.EXTRA_INITIAL_URI,
+                DocumentsContract.buildRootUri(
+                    AppDataDocumentProvider.AUTHORITY,
+                    AppDataDocumentProvider.ROOT_ID
+                )
+            )
+        }
+        startActivity(intent)
+        true
+    } catch (_: ActivityNotFoundException) {
         false
     }
 }

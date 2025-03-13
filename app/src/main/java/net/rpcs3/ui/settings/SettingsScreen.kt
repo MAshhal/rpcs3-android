@@ -93,7 +93,9 @@ fun SettingsScreen(
                     leadingIcon = { PreferenceIcon(icon = painterResource(R.drawable.ic_folder)) },
                     subtitle = { PreferenceSubtitle(text = "Open internal directory of RPCS3 in file manager") },
                 ) {
-                    context.launchBrowseIntent()
+                    context.launchBrowseIntent(
+                        action = "android.provider.action.BROWSE"
+                    )
                 }
             }
 
@@ -106,7 +108,7 @@ fun SettingsScreen(
                     leadingIcon = { PreferenceIcon(icon = painterResource(R.drawable.ic_folder)) },
                     subtitle = { PreferenceSubtitle(text = "Open internal directory of RPCS3 in file manager") },
                 ) {
-                    context.launchBrowseIntent(Intent.ACTION_VIEW)
+                    context.launchBrowseIntent()
                 }
             }
 
@@ -119,7 +121,76 @@ fun SettingsScreen(
                     leadingIcon = { PreferenceIcon(icon = painterResource(R.drawable.ic_folder)) },
                     subtitle = { PreferenceSubtitle(text = "Open internal directory of RPCS3 in file manager") },
                 ) {
-                    context.launchBrowseIntent(Intent.ACTION_VIEW)
+                    context.launchBrowseIntent(
+                        action = Intent.ACTION_OPEN_DOCUMENT
+                    ) {
+                        putExtra(
+                            DocumentsContract.EXTRA_INITIAL_URI,
+                            DocumentsContract.buildRootUri(
+                                AppDataDocumentProvider.AUTHORITY,
+                                AppDataDocumentProvider.ROOT_ID
+                            )
+                        )
+                    }
+                }
+            }
+
+            item { HorizontalDivider() }
+            item(
+                key = "internal_directory_4"
+            ) {
+                RegularPreference(
+                    title = { PreferenceTitle(title = "View Internal Directory") },
+                    leadingIcon = { PreferenceIcon(icon = painterResource(R.drawable.ic_folder)) },
+                    subtitle = { PreferenceSubtitle(text = "Open internal directory of RPCS3 in file manager") },
+                ) {
+                    context.launchBrowseIntent(Intent.ACTION_OPEN_DOCUMENT)
+                }
+            }
+
+            item { HorizontalDivider() }
+            item(
+                key = "internal_directory_4"
+            ) {
+                RegularPreference(
+                    title = { PreferenceTitle(title = "View Internal Directory") },
+                    leadingIcon = { PreferenceIcon(icon = painterResource(R.drawable.ic_folder)) },
+                    subtitle = { PreferenceSubtitle(text = "Open internal directory of RPCS3 in file manager") },
+                ) {
+                    context.launchBrowseIntent(
+                        action = Intent.ACTION_OPEN_DOCUMENT
+                    ) {
+                        putExtra(
+                            DocumentsContract.EXTRA_INITIAL_URI,
+                            DocumentsContract.buildRootUri(
+                                AppDataDocumentProvider.AUTHORITY,
+                                AppDataDocumentProvider.ROOT_ID
+                            )
+                        )
+                    }
+                }
+            }
+
+            item { HorizontalDivider() }
+            item(
+                key = "internal_directory_6"
+            ) {
+                RegularPreference(
+                    title = { PreferenceTitle(title = "View Internal Directory") },
+                    leadingIcon = { PreferenceIcon(icon = painterResource(R.drawable.ic_folder)) },
+                    subtitle = { PreferenceSubtitle(text = "Open internal directory of RPCS3 in file manager") },
+                ) {
+                    context.launchBrowseIntent(
+                        action = Intent.ACTION_OPEN_DOCUMENT_TREE
+                    ) {
+                        putExtra(
+                            DocumentsContract.EXTRA_INITIAL_URI,
+                            DocumentsContract.buildRootUri(
+                                AppDataDocumentProvider.AUTHORITY,
+                                AppDataDocumentProvider.ROOT_ID
+                            )
+                        )
+                    }
                 }
             }
 
@@ -166,7 +237,7 @@ private fun SettingsScreenPreview() {
 }
 
 private fun Context.launchBrowseIntent(
-    action: String = "android.provider.action.BROWSE"
+    action: String = Intent.ACTION_VIEW
 ): Boolean {
     return try {
         val intent = Intent(action).apply {
@@ -185,17 +256,12 @@ private fun Context.launchBrowseIntent(
     }
 }
 
-private fun Context.launchBrowseIntent(): Boolean {
+private fun Context.launchBrowseIntent(
+    action: String = Intent.ACTION_VIEW,
+    block: Intent.() -> Unit
+): Boolean {
     return try {
-        val intent = Intent(Intent.ACTION_OPEN_DOCUMENT_TREE).apply {
-            putExtra(
-                DocumentsContract.EXTRA_INITIAL_URI,
-                DocumentsContract.buildRootUri(
-                    AppDataDocumentProvider.AUTHORITY,
-                    AppDataDocumentProvider.ROOT_ID
-                )
-            )
-        }
+        val intent = Intent(action).apply(block)
         startActivity(intent)
         true
     } catch (_: ActivityNotFoundException) {

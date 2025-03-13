@@ -150,7 +150,7 @@ fun SettingsScreen(
 
             item { HorizontalDivider() }
             item(
-                key = "internal_directory_4"
+                key = "internal_directory_5"
             ) {
                 RegularPreference(
                     title = { PreferenceTitle(title = "View Internal Directory") },

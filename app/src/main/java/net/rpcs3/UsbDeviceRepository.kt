@@ -40,7 +40,13 @@ fun listenUsbEvents(context: Context): () -> Unit  {
             }
 
             if (UsbManager.ACTION_USB_DEVICE_ATTACHED == intent.action) {
-                val device: UsbDevice? = intent.getParcelableExtra(UsbManager.EXTRA_DEVICE)
+                val device: UsbDevice? = with(intent) {
+                    if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.TIRAMISU)
+                        getParcelableExtra(UsbManager.EXTRA_DEVICE, UsbDevice::class.java)
+                    else {
+                        @Suppress("DEPRECATION") getParcelableExtra(UsbManager.EXTRA_DEVICE)
+                    }
+                }
                 Log.i("USB", "device attached")
                 if (device != null) {
                     if (usbManager.hasPermission(device)) {
@@ -56,7 +62,13 @@ fun listenUsbEvents(context: Context): () -> Unit  {
             }
 
             if (ACTION_USB_PERMISSION == intent.action) {
-                val device: UsbDevice? = intent.getParcelableExtra(UsbManager.EXTRA_DEVICE)
+                val device: UsbDevice? = with(intent) {
+                    if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.TIRAMISU)
+                        getParcelableExtra(UsbManager.EXTRA_DEVICE, UsbDevice::class.java)
+                    else {
+                        @Suppress("DEPRECATION") getParcelableExtra(UsbManager.EXTRA_DEVICE)
+                    }
+                }
 
                 if (device != null && intent.getBooleanExtra(
                         UsbManager.EXTRA_PERMISSION_GRANTED,

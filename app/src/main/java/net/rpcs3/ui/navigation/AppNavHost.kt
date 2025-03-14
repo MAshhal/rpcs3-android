@@ -15,6 +15,7 @@ import androidx.compose.foundation.verticalScroll
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.Add
 import androidx.compose.material.icons.filled.Menu
+import androidx.compose.material.icons.filled.Settings
 import androidx.compose.material.icons.outlined.Build
 import androidx.compose.material.icons.outlined.Info
 import androidx.compose.material3.CenterAlignedTopAppBar
@@ -40,31 +41,61 @@ import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.tooling.preview.Preview
 import androidx.compose.ui.unit.dp
+import androidx.lifecycle.compose.dropUnlessResumed
+import androidx.navigation.compose.NavHost
+import androidx.navigation.compose.composable
+import androidx.navigation.compose.rememberNavController
 import kotlinx.coroutines.launch
 import net.rpcs3.FirmwareRepository
 import net.rpcs3.PrecompilerService
 import net.rpcs3.PrecompilerServiceAction
 import net.rpcs3.ProgressRepository
 import net.rpcs3.RPCS3
+import net.rpcs3.ui.settings.SettingsScreen
 import net.rpcs3.dialogs.AlertDialogQueue
 import net.rpcs3.ui.games.GamesScreen
 
-@OptIn(ExperimentalMaterial3Api::class)
 @Preview
 @Composable
 fun AppNavHost() {
-    val drawerState = rememberDrawerState(initialValue = DrawerValue.Closed)
+    val navController = rememberNavController()
+    AlertDialogQueue.AlertDialog()
+    NavHost(
+        navController = navController,
+        startDestination = "games"
+    ) {
+        composable(
+            route = "games"
+        ) {
+            GamesDestination(
+                navigateToSettings = { navController.navigate("settings") }
+            )
+        }
+
+        composable(
+            route = "settings"
+        ) {
+            SettingsScreen(
+                navigateBack = navController::navigateUp
+            )
+        }
+    }
+}
+
+@OptIn(ExperimentalMaterial3Api::class)
+@Composable
+fun GamesDestination(
+    navigateToSettings: () -> Unit
+) {
+    val context = LocalContext.current
     val scope = rememberCoroutineScope()
+    val drawerState = rememberDrawerState(initialValue = DrawerValue.Closed)
 
     BackHandler(enabled = drawerState.isOpen) {
         scope.launch {
             drawerState.close()
         }
     }
-
-    val context = LocalContext.current
-
-    AlertDialogQueue.AlertDialog()
 
     val installPkgLauncher = rememberLauncherForActivityResult(
         contract = ActivityResultContracts.GetContent(),
@@ -154,6 +185,14 @@ fun AppNavHost() {
                             onClick = {
                                 AlertDialogQueue.showDialog("System Info", RPCS3.instance.systemInfo())
                             }
+                        )
+                        HorizontalDivider(modifier = Modifier.padding(vertical = 8.dp))
+
+                        NavigationDrawerItem(
+                            label = { Text("Settings") },
+                            selected = false,
+                            icon = { Icon(Icons.Default.Settings, null) },
+                            onClick = navigateToSettings
                         )
                     }
                 }
